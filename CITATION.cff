@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+message: >-
+  This repository is an independent reimplementation of DE-ICM. If you use it,
+  please cite the original paper below rather than this repository.
+title: de-icm
+type: software
+authors:
+  - family-names: Day
+    given-names: Jesse
+repository-code: https://github.com/magratheazaphod/de-icm
+license: MIT
+preferred-citation:
+  type: article
+  title: Near-Exact Computation of Independent Chip Model Placement Probabilities for Thousands of Players
+  authors:
+    - family-names: Inariba
+      given-names: Wataru
+      affiliation: GTO Wizard
+  year: 2026
+  month: 10
+  url: https://arxiv.org/abs/2610.06028
+  identifiers:
+    - type: other
+      value: arXiv:2610.06028

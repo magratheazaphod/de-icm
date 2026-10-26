@@ -1,12 +1,17 @@
 # de-icm
 
-Near-exact Independent Chip Model (ICM) placement probabilities and equities for poker
-tournament fields of up to thousands of players, in Python and NumPy.
+An independent attempt to reproduce **DE-ICM**, the algorithm published by Wataru Inariba of
+GTO Wizard in *Near-Exact Computation of Independent Chip Model Placement Probabilities for
+Thousands of Players*, [arXiv:2610.06028](https://arxiv.org/abs/2610.06028) (October 2026),
+in Python and NumPy.
 
-An independent reimplementation of DE-ICM from Wataru Inariba, *Near-Exact Computation of
-Independent Chip Model Placement Probabilities for Thousands of Players*,
-[arXiv:2610.06028](https://arxiv.org/abs/2610.06028) (October 2026). The paper publishes the
-method and its validation suite but no code.
+**The algorithm, its analysis and its validation design are entirely the work of the paper's
+author and GTO Wizard. Nothing here is original research.** The paper describes the method in
+full and states that neither the research implementation nor GTO Wizard's production code is
+released, and that the description is intended to support independent reimplementation. This
+repository is that: a from-scratch implementation written from the paper alone, with no access
+to any GTO Wizard code, and a reproduction of the paper's accuracy claims against the exact
+reference families it specifies. See [Attribution](#attribution) below.
 
 ## What ICM is
 
@@ -31,7 +36,7 @@ full algorithm and grid parameters are in [docs/SPEC.md](docs/SPEC.md).
 ## Installation
 
 ```
-git clone <this repository>
+git clone https://github.com/magratheazaphod/de-icm.git
 cd de-icm
 uv sync
 ```
@@ -121,10 +126,35 @@ parameters are listed in sections 6 and 7 of [docs/SPEC.md](docs/SPEC.md). Run i
   blind levels and payout-aware play. How well it describes real tournaments is a separate
   question from how accurately this code computes it.
 
-## Reference
+## Attribution
 
-W. Inariba, *Near-Exact Computation of Independent Chip Model Placement Probabilities for
-Thousands of Players*, [arXiv:2610.06028](https://arxiv.org/abs/2610.06028), October 2026.
+- **Method:** DE-ICM is due to Wataru Inariba (GTO Wizard). The paper credits an earlier version
+  of the method as being in production inside GTO Wizard's tournament solver since 2024. The
+  name DE-ICM is the paper's. This repository does not reproduce any GTO Wizard code or data and
+  is not affiliated with or endorsed by GTO Wizard.
+- **This implementation:** written by Jesse Day from the paper, with heavy assistance from
+  Claude (Anthropic). The commit history records that assistance.
+- **Related prior work cited by the paper:** the integral representation goes back to the
+  analysis of the move-to-front rule (Fill and Holst; Flajolet, Gardy and Thimonier) and was
+  independently used for Plackett-Luce propensities (Knyazev and Oosterhuis, MPL) and for ICM
+  (Wolters, LAQI). See the paper's Section 6 for the full discussion.
+
+If you use this code, please cite the paper, not this repository:
+
+```bibtex
+@misc{inariba2026deicm,
+  title         = {Near-Exact Computation of Independent Chip Model Placement Probabilities for Thousands of Players},
+  author        = {Inariba, Wataru},
+  year          = {2026},
+  month         = oct,
+  eprint        = {2610.06028},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.DS},
+  url           = {https://arxiv.org/abs/2610.06028}
+}
+```
+
+A `CITATION.cff` is included so that GitHub's citation widget points at the paper.
 
 ## License
 

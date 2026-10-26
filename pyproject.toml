@@ -1,0 +1,25 @@
+[project]
+name = "deicm"
+version = "0.1.0"
+description = "DE-ICM: near-exact Independent Chip Model placement probabilities and equities for fields of thousands of players"
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "Jesse Day" }]
+requires-python = ">=3.12"
+dependencies = ["numpy>=2.0"]
+
+[project.scripts]
+deicm = "deicm.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8", "mpmath>=1.3"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["deicm"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

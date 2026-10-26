@@ -243,3 +243,206 @@ prize pool and the grid used. `--places` prints the placement matrix for the pai
 
 The chip-EV column is the point of the tool: it is what the same stacks are worth under chip EV,
 so the delta is the deviation ICM introduces.
+
+## 10. Perturbation mode (this implementation, not from the paper)
+
+Purpose: make ICM pressure visible by asking "what happens to everyone's equity if this
+all-in happens". One primitive and one derived table.
+
+### 10.1 Primitive: all-in between two seats
+
+`allin(stacks, prizes, winner, loser) -> AllInResult` (seats are 0-based indices in the
+library, 1-based on the CLI).
+
+- Amount at risk is `a = min(s_winner, s_loser)`. Winner gains `a`, loser loses `a`.
+- If `s_loser <= s_winner` the loser busts (ties bust the loser). Then:
+  - the loser's final equity is the prize for place `n` if `n <= m`, else 0;
+  - the remaining `n - 1` players are re-evaluated with prizes `prizes[:min(m, n - 1)]`.
+- Otherwise all `n` players remain and are re-evaluated with the new stacks.
+- Result fields, all in input seat order and length n: `stacks_after`, `equity_before`,
+  `equity_after`, `delta` (after minus before), `chip_ev_before`, `chip_ev_after`,
+  `chip_delta`, plus `winner`, `loser`, `amount`, `busted: bool`.
+- Chip EV after a bust: the busted player's chip EV is their payout (as above), and the
+  others' chip EV is `s_i / S' * sum(prizes[:min(m, n-1)])` on the reduced field, so that
+  the chip-EV columns are the same thought experiment under the proportional model.
+
+### 10.2 Derived: bubble factors
+
+For an ordered pair (i, j), with `gain = equity gain of i if i doubles through j` and
+`loss = equity loss of i if i loses an all-in to j` (both via 10.1, amount `min(s_i, s_j)`):
+
+    bubble_factor[i, j] = loss / gain
+    required_equity[i, j] = loss / (gain + loss)       # break-even win probability vs j, no pot
+    risk_premium[i, j]   = required_equity[i, j] - 0.5
+
+Diagonal is undefined (NaN). Under chip EV every bubble factor is exactly 1 and the required
+equity exactly 0.5; under ICM with winner-take-all prizes the same holds exactly, because
+equity is then linear in stacks. That is a test.
+
+`bubble_factors(stacks, prizes, seats=None) -> BubbleFactors` with `bf`, `required_equity`,
+`risk_premium` as `(k, k)` arrays over the chosen `seats` (default: all seats if n <= 12,
+else the first 9), computed with the rest of the field held fixed. Cost is two ICM
+evaluations per ordered pair, so restrict seats for large fields.
+
+### 10.3 CLI
+
+Flags added to the existing command (no subcommands, the current invocation keeps working):
+
+    deicm <stacks...> --prizes ... --allin W L          # W doubles through L (1-based seats)
+    deicm <stacks...> --prizes ... --bubble-factors [--seats 1-9]
+
+`--allin` prints: a header line ("seat W wins A chips from seat L" and "seat L busts" when it
+does), then one row per seat: seat, stack before, stack after, chipEV before, chipEV after,
+chip delta, ICM before, ICM after, ICM delta. Then two summary lines for the pair: the winner's
+ICM gain versus chip gain, and the loser's ICM loss versus chip loss.
+
+`--bubble-factors` prints a `k x k` table of bubble factors with 2 decimals (rows: the seat
+at risk, columns: the opponent), then the same shape as required equity in percent with 1
+decimal. Diagonals print as `-`. Footer notes that chip EV would give 1.00 and 50.0%
+everywhere.
+
+`--json` includes these under `allin` / `bubble_factors` keys when requested.
+`--allin` and `--bubble-factors` may be combined with each other and with `--places`.
+
+### 10.4 Dead money (`pot`)
+
+`allin(..., pot=0.0)` and `bubble_factors(..., pot=0.0)`, CLI `--pot CHIPS`.
+
+`pot` is chips already in the middle that belong to neither player (blinds and antes posted by
+others, or a raise that was folded). The listed stacks are taken as already net of whatever the
+listed players posted. The pot is won by whoever takes the hand and is subtracted from nobody.
+
+For a player `i` facing an all-in from `j` (the ordered pair of 10.2), there are three outcomes:
+
+- call and win:  `s_i + a + pot`, `s_j - a`         (j busts if `s_j <= s_i`)
+- call and lose: `s_i - a`, `s_j + a + pot`         (i busts if `s_i <= s_j`)
+- fold:          `s_i`, `s_j + pot`                  (the pot goes to the aggressor)
+
+Define `V_win`, `V_lose`, `V_fold` as player `i`'s equity in each, and
+
+    gain = V_win - V_fold
+    loss = V_fold - V_lose
+    bubble_factor   = loss / gain
+    required_equity = loss / (gain + loss)
+
+so `required_equity` is the break-even calling probability against the fold alternative.
+With `pot = 0`, `V_fold` equals the current equity and this reduces exactly to 10.1 and 10.2,
+bit for bit. With `pot > 0`, more dead money lowers `required_equity` for every pair, including a
+dominant chip leader, because the fold branch now also carries the pot's dilution.
+
+`allin` keeps reporting the win branch (winner gains `a + pot`, loser loses `a`, bust rule as in
+10.1) and additionally exposes `equity_fold` (length n: everyone's equity in the fold branch,
+where the named winner is treated as the aggressor who collects the pot) so that callers can form
+the same differences. Validate `pot >= 0`.
+
+## 11. Web app (this implementation)
+
+A small mobile-first page served by the same package, deployed as its own Fly app, for use
+between hands, on breaks and for deal talk. It is not a decision aid during a hand.
+
+### 11.1 Server
+
+- `deicm/web/app.py`: FastAPI app, factory `create_app() -> FastAPI`, run by uvicorn on
+  `$PORT` (default 8080). Entry point `deicm-web` in pyproject.
+- Routes:
+  - `GET /` the page (static HTML, inline CSS and JS, no build step, no CDN dependencies).
+  - `GET /healthz` returns `{"ok": true}` and performs one tiny `icm` call so a broken numpy
+    import fails the check.
+  - `POST /api/table` body `{stacks: [...], prizes: [...], hero: int (0-based), pot: number,
+    others: {count: int, average: number} | null}`. `others` appends `count` players at
+    `average` to the field (the rest of the tournament, held fixed). Response: everything
+    the page shows, computed with `icm`, `allin` and `bubble_factors` restricted to the
+    listed seats: per seat `stack, chip_ev, equity, delta, itm, p_first`; for the hero, per
+    opponent `you_need, they_need, your_bf, their_bf, you_gain, you_lose`; the `k x k`
+    `required_equity` matrix; `grid`; `pool`. Validation errors return 422 with a message.
+- Optional basic auth: if the env var `AUTH_USERS` is set (`user:pass,user:pass`, the same
+  convention as tp-solver), every route except `/healthz` requires HTTP basic auth against it,
+  compared in constant time. Unset means open.
+- Dependencies added: `fastapi`, `uvicorn[standard]`. Keep them in an optional dependency
+  group `web` so the library install stays numpy-only.
+
+### 11.2 Page
+
+- Dark theme by default (light text on dark grey), legible outdoors on a phone, large tap
+  targets, works one-handed in portrait. No frameworks. Everything in one HTML file.
+- Inputs: nine seat rows (stack per seat, hero toggle on one of them, empty seats ignored),
+  a "rest of field" row (players remaining and average stack, optional), a payout block
+  (percentages plus pool, or amounts; a few presets such as 15 percent paid with a
+  standard curve), and a pot field (dead money in chips, default the sum of blinds and antes
+  the user types once).
+- Output, top to bottom:
+  1. Hero line: ICM equity versus chip EV, delta in money and percent, P(ITM).
+  2. One row per opponent: seat, stack, "you need" and "they need" as percentages, with
+     the pair's bubble factors on tap. Colour the cells by distance from 50 percent so the
+     asymmetry reads at a glance.
+  3. Collapsed: the full required-equity matrix, and the per-seat equity table.
+- State (stacks, payouts, hero, pot) persists in `localStorage` so a table survives a page
+  reload; wrap storage access in try/catch.
+- Recompute on every input change with a short debounce; show the grid and compute time in
+  a footer.
+
+### 11.3 Deployment
+
+- `Dockerfile`: `python:3.12-slim`, install with uv (`uv sync --no-dev --extra web` or the
+  equivalent for the optional group), non-root user, `EXPOSE 8080`, `CMD` runs uvicorn.
+- `fly.toml`: app `de-icm`, `primary_region = "ord"`, `[http_service]` with
+  `internal_port = 8080`, `force_https = true`, `auto_stop_machines = "stop"`,
+  `auto_start_machines = true`, `min_machines_running = 0`, a check on `/healthz`;
+  `[[vm]]` `shared-cpu-1x`, `512mb`. No volume (stateless).
+- README: a "Web app" section with local run (`uv run deicm-web`), the Fly deploy steps
+  (`fly launch --copy-config --no-deploy`, `fly secrets set AUTH_USERS=...`, `fly deploy`),
+  and the note that it is for between hands and breaks.
+
+## 12. Tournament state from a photo or screenshot
+
+PokerAtlas live tournament pages (TableCaptain rooms such as the Lodge) show the state behind a
+sign-in, in four tabs: Clock (level, blinds, ante, time left), Structure, Chips (entries,
+players remaining, average stack, total chips) and Payout (places and amounts). Room clocks on
+the wall show a subset of the same. Rather than scrape, the app accepts a photo or screenshot of
+any of these and extracts the state with a vision model, then fills the table form.
+
+### 12.1 Extraction
+
+- `deicm/web/extract.py`: `extract_state(image_bytes: bytes, media_type: str) -> TournamentState`
+  using the Anthropic Python SDK (`anthropic` package, optional dependency in the `web` extra),
+  model `claude-opus-5-5`, `client.messages.parse(..., output_format=TournamentState)` with a
+  Pydantic model, one image block (base64) followed by a short text instruction. Thinking is
+  left at the model default (do not send a `thinking` parameter or `budget_tokens`). Set
+  `max_tokens` to 4096: the output is a small JSON object.
+- `TournamentState` (all fields optional except `source_kind`, since a photo may show only
+  part of the state):
+  `source_kind: Literal["pokeratlas", "room_clock", "other"]`, `venue`, `event_name`,
+  `level`, `small_blind`, `big_blind`, `ante`, `ante_kind: Literal["per_player", "big_blind_ante", "none"] | None`,
+  `time_left_in_level_seconds`, `entries`, `players_remaining`, `average_stack`,
+  `total_chips`, `prize_pool`, `places_paid`, `payouts: list[Payout]` with
+  `Payout(place_from: int, place_to: int, amount: float)` so that ranges such as "10th to 18th:
+  $450" are one entry, `confidence: Literal["high", "medium", "low"]`, and `notes: str` for
+  anything the model could not read.
+- The text instruction states: read only what is visible, never infer missing numbers, use
+  `null` for anything not shown, amounts in the currency shown without symbols, and expand a
+  payout row that covers several places into `place_from`/`place_to`.
+- The API key comes from the environment (`ANTHROPIC_API_KEY`), which on Fly is a secret. If it
+  is unset, the route below returns 503 with a message saying photo import is not configured.
+- Handle `stop_reason == "refusal"` by returning 422 with the explanation, and `anthropic`
+  typed errors by returning 502 with a short message. Log the request id.
+
+### 12.2 Route and page
+
+- `POST /api/extract`, multipart with one `image` file (JPEG, PNG, WebP or HEIC converted
+  client-side; cap at 8 MB), returns the `TournamentState` as JSON plus a derived `prefill`
+  object the page can apply directly:
+  - `prizes`: the payouts expanded to one amount per place, in order;
+  - `pot`: `small_blind + big_blind + ante_total`, where `ante_total` is `ante * 9` for
+    per-player antes, `ante` for a big-blind ante, 0 otherwise;
+  - `others`: `{count: players_remaining - 9, average: average_stack}` when both are present
+    (the page subtracts the seats the user actually fills, so the server sends the raw
+    `players_remaining` and `average_stack` too).
+- Page: a "From photo" button that opens the camera or photo library (`<input type="file"
+  accept="image/*" capture="environment">`), shows a spinner, applies the prefill to the
+  payout block, pot and rest-of-field fields, and shows the extracted state in a small review
+  panel with the confidence and notes, so the user can correct it before trusting it. Stacks
+  at the table are never extracted; they are typed by the user.
+- Tests: unit-test the prefill derivation from a handcrafted `TournamentState` (per-player and
+  big-blind antes, payout ranges, missing fields) and the 503 path when the key is unset; the
+  live extraction call is exercised by a script `scripts/extract_demo.py <image>` rather than
+  by the test suite.

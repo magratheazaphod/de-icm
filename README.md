@@ -102,6 +102,49 @@ Add `--places` to print the placement probability of every seat in every paid pl
 equities, delta, delta percent, P(ITM), P(1st) and the placement matrix). Errors, including
 invalid input rejected by the library, are printed to standard error with exit status 2.
 
+### Perturbations and bubble factors
+
+```
+deicm 62000 41000 28000 22000 15500 11000 8000 5200 3100 --prizes-pct 30 20 14 10 8 6 5 4 3 --pool 30000 --allin 9 1
+deicm 62000 41000 28000 22000 15500 11000 8000 5200 3100 --prizes-pct 30 20 14 10 8 6 5 4 3 --pool 30000 --bubble-factors --seats 1-5
+```
+
+`--allin W L` shows what happens to every seat's chip EV and ICM equity if seat W beats seat L
+all-in (seats are 1-based); a loser whose stack is no larger than the winner's busts, and the
+rest of the field is re-evaluated. `--bubble-factors` prints, for each pair of seats, the
+bubble factor (equity lost when losing an all-in divided by equity gained when winning it) and
+the required equity (the win probability needed to break even, with no dead money). Under chip
+EV the bubble factor is 1 and the required equity 50 percent, so anything above that is ICM
+pressure. `--seats` takes forms like `1-9`, `1,3,5` or `1-4,7`; the default is all seats up to
+12 players and the first 9 otherwise. Add `--pot CHIPS` for dead money already in the middle
+(for example the blinds and antes of other players): the winner of each all-in also collects it,
+so required equity drops: it is the break-even win probability against folding, with the dead pot going to the aggressor on a fold. The listed stacks are taken as already net of what those players posted. Both flags may be combined with each other, `--places`
+and `--json`. The library equivalents are `deicm.allin` and `deicm.bubble_factors`.
+
+## Web app
+
+A small mobile-first page for use between hands, on breaks and for deal talk. It is not a
+decision aid during a hand. Enter up to nine stacks, mark the hero, optionally describe the
+rest of the field, set the payouts and any dead money in the pot, and it shows the hero's ICM
+equity against chip EV and, for each opponent, the equity you need and they need to call an
+all-in.
+
+```bash
+uv sync --extra web
+uv run deicm-web          # http://localhost:8080, or set $PORT
+```
+
+The library install stays numpy-only; FastAPI and uvicorn live in the optional `web` extra.
+Set `AUTH_USERS=user:pass,user:pass` to require HTTP basic auth on everything except `/healthz`.
+
+Deploy to Fly.io (stateless, stops itself when idle):
+
+```bash
+fly launch --copy-config --no-deploy
+fly secrets set AUTH_USERS=user:pass
+fly deploy
+```
+
 ## Accuracy
 
 On instances with exact answers (winner-take-all, two prizes, flat, linear, equal stacks, two

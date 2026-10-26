@@ -1,0 +1,25 @@
+# Run `fly launch --copy-config --no-deploy` to create the app, then follow the
+# deploy steps in README.md ("Web app").
+app = "de-icm"
+primary_region = "ord"
+
+[build]
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Stateless and idle most of the time: let Fly stop the machine between sessions.
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/healthz"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

@@ -15,16 +15,22 @@ import secrets
 import time
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+import logging
+
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field, model_validator
 
 from deicm.core import icm
+from deicm.web.extract import RefusalError, derive_prefill, extract_state
 from deicm.perturb import allin, bubble_factors
 
 INDEX_HTML = Path(__file__).parent / "static" / "index.html"
 MAX_PLAYERS = 4000
+MAX_IMAGE_BYTES = 8 * 1024 * 1024
+IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+log = logging.getLogger("deicm.web")
 
 
 class Others(BaseModel):
@@ -188,6 +194,39 @@ def create_app() -> FastAPI:
     @app.post("/api/table")
     def table(req: TableRequest) -> dict:
         return compute_table(req)
+
+
+    @app.post("/api/extract")
+    def extract(image: UploadFile = File(...)) -> dict:
+        if not os.environ.get("ANTHROPIC_API_KEY"):
+            raise HTTPException(503, "Photo import is not configured on this server (ANTHROPIC_API_KEY is not set).")
+        media_type = (image.content_type or "").lower()
+        if media_type == "image/jpg":
+            media_type = "image/jpeg"
+        if media_type not in IMAGE_TYPES:
+            raise HTTPException(422, "Upload a JPEG, PNG or WebP image.")
+        data = image.file.read(MAX_IMAGE_BYTES + 1)
+        if len(data) > MAX_IMAGE_BYTES:
+            raise HTTPException(422, "Image is larger than 8 MB.")
+        if not data:
+            raise HTTPException(422, "The image file is empty.")
+
+        import anthropic
+
+        try:
+            state = extract_state(data, media_type)
+        except RefusalError as e:
+            raise HTTPException(422, f"The model declined to read this image: {e}") from e
+        except anthropic.RateLimitError as e:
+            log.warning("anthropic rate limit, request id %s", getattr(e, "request_id", None))
+            raise HTTPException(502, "The vision service is busy; try again in a moment.") from e
+        except anthropic.APIStatusError as e:
+            log.error("anthropic status %s, request id %s", e.status_code, getattr(e, "request_id", None))
+            raise HTTPException(502, "The vision service returned an error; try again.") from e
+        except anthropic.APIConnectionError as e:
+            log.error("anthropic connection error: %s", e)
+            raise HTTPException(502, "Could not reach the vision service; try again.") from e
+        return {"state": state.model_dump(), "prefill": derive_prefill(state)}
 
     return app
 

@@ -72,6 +72,11 @@ th:first-child, td:first-child { text-align: left; }
 td.m { text-align: center; border-radius: 6px; }
 .err { color: var(--bad); }
 footer { margin-top: 24px; color: var(--muted); font-size: 12px; text-align: center; }
+.spin { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: sp .8s linear infinite; vertical-align: -2px; }
+@keyframes sp { to { transform: rotate(360deg); } }
+.review dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 6px 0 0; font-size: 14px; }
+.review dt { color: var(--muted); } .review dd { margin: 0; text-align: right; }
+.review .close { float: right; min-height: 44px; min-width: 44px; background: none; border: 0; color: var(--muted); font-size: 20px; cursor: pointer; }
 #out.stale { opacity: .55; }
 </style>
 </head>
@@ -105,6 +110,13 @@ footer { margin-top: 24px; color: var(--muted); font-size: 12px; text-align: cen
   <button class="chip" type="button" data-p="top3">50 / 30 / 20</button>
   <button class="chip" type="button" data-p="p15">15% paid</button>
 </div>
+
+<div class="seg">
+  <button class="chip" id="photo-btn" type="button">From photo</button>
+  <input type="file" id="photo" accept="image/*" capture="environment" hidden>
+  <span id="photo-spin" class="hint" hidden><span class="spin"></span> Reading image...</span>
+</div>
+<div id="review" aria-live="polite"></div>
 
 <div id="out" aria-live="polite"></div>
 <footer id="foot"></footer>
@@ -323,6 +335,67 @@ function render(d, seatNo, rtt) {
   });
   $("foot").textContent = `${d.n} players, pool ${money(d.pool)} - grid h=${d.grid.h}, M=${d.grid.M} - ${d.ms} ms compute, ${rtt} ms round trip`;
 }
+
+/* ---------- photo import ---------- */
+async function shrink(file) {
+  try {
+    const bmp = await createImageBitmap(file);
+    const scale = Math.min(1, 2000 / Math.max(bmp.width, bmp.height));
+    const c = document.createElement("canvas");
+    c.width = Math.round(bmp.width * scale); c.height = Math.round(bmp.height * scale);
+    c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+    const blob = await new Promise((res) => c.toBlob(res, "image/jpeg", 0.88));
+    return blob ? new File([blob], "photo.jpg", {type: "image/jpeg"}) : file;
+  } catch (e) { return file; }
+}
+function applyPrefill(pf) {
+  if (pf.prizes && pf.prizes.length) { state.mode = "amt"; state.pay = pf.prizes.join(" "); $("pay").value = state.pay; syncMode(); }
+  if (pf.pot != null) { state.pot = String(pf.pot); $("pot").value = state.pot; }
+  if (pf.players_remaining != null && pf.average_stack != null) {
+    const seated = state.seats.filter((s) => num(s) > 0).length || NSEATS;
+    const count = pf.players_remaining - seated;
+    if (count > 0) { state.ocount = String(count); state.oavg = String(pf.average_stack); }
+    else { state.ocount = ""; state.oavg = ""; }
+    $("ocount").value = state.ocount; $("oavg").value = state.oavg;
+  }
+}
+function showReview(s) {
+  const rows = [
+    ["Venue", s.venue], ["Event", s.event_name], ["Level", s.level],
+    ["Blinds", s.small_blind != null || s.big_blind != null ? `${s.small_blind ?? "?"} / ${s.big_blind ?? "?"}` : null],
+    ["Ante", s.ante != null ? `${s.ante}${s.ante_kind ? " (" + s.ante_kind.replace(/_/g, " ") + ")" : ""}` : null],
+    ["Players left", s.players_remaining], ["Average stack", s.average_stack],
+    ["Places paid", s.places_paid ?? (s.payouts.length ? s.payouts[s.payouts.length - 1].place_to : null)],
+    ["Confidence", s.confidence]
+  ].filter((r) => r[1] != null && r[1] !== "");
+  $("review").innerHTML = `<div class="card review"><button class="close" type="button" aria-label="Dismiss">&times;</button>
+    <b>Read from photo - check before trusting</b>
+    <dl class="num">${rows.map((r) => `<dt>${esc(r[0])}</dt><dd>${esc(r[1])}</dd>`).join("")}</dl>
+    ${s.notes ? `<p class="hint">${esc(s.notes)}</p>` : ""}</div>`;
+  $("review").querySelector(".close").addEventListener("click", () => { $("review").innerHTML = ""; });
+}
+$("photo-btn").addEventListener("click", () => $("photo").click());
+$("photo").addEventListener("change", async () => {
+  const f = $("photo").files[0];
+  $("photo").value = "";
+  if (!f) return;
+  $("photo-spin").hidden = false; $("photo-btn").disabled = true; $("review").innerHTML = "";
+  try {
+    const small = await shrink(f);
+    const fd = new FormData();
+    fd.append("image", small, small.name || "photo.jpg");
+    const resp = await fetch("/api/extract", {method: "POST", body: fd});
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(typeof data.detail === "string" ? data.detail : "Request failed (" + resp.status + ")");
+    applyPrefill(data.prefill);
+    showReview(data.state);
+    changed();
+  } catch (e) {
+    $("review").innerHTML = `<p class="err">${esc(e.message)}</p>`;
+  } finally {
+    $("photo-spin").hidden = true; $("photo-btn").disabled = false;
+  }
+});
 
 /* ---------- init ---------- */
 load();

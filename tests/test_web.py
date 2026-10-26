@@ -114,3 +114,88 @@ def test_pot_lowers_you_need(client):
     dead = client.post("/api/table", json={**BODY, "pot": 600}).json()["opponents"]
     for a, b in zip(base, dead):
         assert b["you_need"] < a["you_need"]
+
+
+# ---------- photo import (no live API calls) ----------
+from deicm.web.extract import Payout, TournamentState, derive_prefill  # noqa: E402
+
+
+def _state(**kw):
+    return TournamentState(source_kind="pokeratlas", confidence="high", **kw)
+
+
+def test_prefill_per_player_ante_and_ranges():
+    s = _state(
+        small_blind=200, big_blind=400, ante=50, ante_kind="per_player",
+        players_remaining=60, average_stack=20000,
+        payouts=[Payout(place_from=4, place_to=6, amount=300), Payout(place_from=1, place_to=1, amount=1000),
+                 Payout(place_from=2, place_to=2, amount=600), Payout(place_from=3, place_to=3, amount=450)],
+    )
+    pf = derive_prefill(s)
+    assert pf["prizes"] == [1000, 600, 450, 300, 300, 300]
+    assert pf["pot"] == 200 + 400 + 50 * 9
+    assert pf["others"] == {"count": 51, "average": 20000}
+    assert pf["players_remaining"] == 60 and pf["average_stack"] == 20000
+
+
+def test_prefill_big_blind_ante_and_none():
+    bba = derive_prefill(_state(small_blind=100, big_blind=200, ante=200, ante_kind="big_blind_ante"))
+    assert bba["pot"] == 500
+    none = derive_prefill(_state(small_blind=100, big_blind=200, ante=75, ante_kind="none"))
+    assert none["pot"] == 300
+
+
+def test_prefill_missing_fields():
+    pf = derive_prefill(_state())
+    assert pf == {"prizes": None, "pot": None, "others": None, "players_remaining": None, "average_stack": None}
+    assert derive_prefill(_state(players_remaining=40))["others"] is None
+    assert derive_prefill(_state(big_blind=400))["pot"] == 400
+
+
+def test_extract_503_when_key_unset(client, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    r = client.post("/api/extract", files={"image": ("a.png", b"x", "image/png")})
+    assert r.status_code == 503 and "not configured" in r.json()["detail"]
+
+
+def test_extract_rejects_bad_uploads(client, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "dummy")
+    r = client.post("/api/extract", files={"image": ("a.txt", b"x", "text/plain")})
+    assert r.status_code == 422
+    big = b"0" * (8 * 1024 * 1024 + 1)
+    r = client.post("/api/extract", files={"image": ("a.png", big, "image/png")})
+    assert r.status_code == 422 and "8 MB" in r.json()["detail"]
+
+
+def test_extract_requires_auth(monkeypatch):
+    monkeypatch.setenv("AUTH_USERS", "a:b")
+    c = TestClient(create_app())
+    assert c.post("/api/extract", files={"image": ("a.png", b"x", "image/png")}).status_code == 401
+
+
+def test_extract_error_mapping(client, monkeypatch):
+    import anthropic
+    import httpx
+
+    import deicm.web.app as appmod
+    from deicm.web.extract import RefusalError
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "dummy")
+    files = {"image": ("a.png", b"x", "image/png")}
+    req = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+
+    def raiser(exc):
+        def f(*a, **k):
+            raise exc
+        return f
+
+    monkeypatch.setattr(appmod, "extract_state", raiser(RefusalError("nope")))
+    r = client.post("/api/extract", files=files)
+    assert r.status_code == 422 and "nope" in r.json()["detail"]
+
+    rl = anthropic.RateLimitError("slow", response=httpx.Response(429, request=req), body=None)
+    st = anthropic.InternalServerError("boom", response=httpx.Response(500, request=req), body=None)
+    cn = anthropic.APIConnectionError(request=req)
+    for exc in (rl, st, cn):
+        monkeypatch.setattr(appmod, "extract_state", raiser(exc))
+        assert client.post("/api/extract", files=files).status_code == 502

@@ -1,7 +1,7 @@
 # Run `fly launch --copy-config --no-deploy` to create the app, then follow the
 # deploy steps in README.md ("Web app").
 app = "de-icm"
-primary_region = "ord"
+primary_region = "dfw"
 
 [build]
 

@@ -30,7 +30,7 @@ input[type=text] {
 input[type=text]:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 label.field { display: block; font-size: 13px; color: var(--muted); }
 label.field input { margin-top: 4px; color: var(--text); font-size: 16px; }
-.seat { display: grid; grid-template-columns: 44px 1fr 64px; gap: 8px; align-items: center; margin-bottom: 6px; }
+.seat { display: grid; grid-template-columns: 44px 1fr 64px 36px; gap: 8px; align-items: center; margin-bottom: 6px; }
 .seat .no { color: var(--muted); text-align: center; }
 .hero-pick {
   min-height: 44px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel);
@@ -52,12 +52,14 @@ label.field input { margin-top: 4px; color: var(--text); font-size: 16px; }
 .opp { width: 100%; text-align: left; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; margin-bottom: 6px; padding: 0; overflow: hidden; }
 .opp > button {
   all: unset; box-sizing: border-box; width: 100%; min-height: 48px; padding: 6px 10px; cursor: pointer;
-  display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center;
+  display: grid; grid-template-columns: 1fr auto auto auto; gap: 6px; align-items: center;
 }
 .opp .who b { font-weight: 600; } .opp .who span { display: block; color: var(--muted); font-size: 13px; }
-.cell { min-width: 70px; text-align: center; border-radius: 8px; padding: 6px 4px; font-weight: 600; }
+.cell { min-width: 62px; text-align: center; border-radius: 8px; padding: 6px 4px; font-weight: 600; }
 .cell small { display: block; font-weight: 400; font-size: 11px; opacity: .85; }
 .cell.you { box-shadow: inset 0 0 0 2px var(--accent); }
+.cell.bf { background: var(--line); }
+.seat-x { background: none; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); font-size: 20px; line-height: 1; height: 36px; }
 .detail { padding: 8px 12px 12px; border-top: 1px solid var(--line); font-size: 14px; display: none; }
 .opp.open .detail { display: block; }
 .detail dl { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; margin: 0; }
@@ -85,10 +87,11 @@ footer { margin-top: 24px; color: var(--muted); font-size: 12px; text-align: cen
 
 <h2>Seats</h2>
 <div id="seats"></div>
+<button class="chip" id="add-seat" type="button">+ Add seat</button>
 <div class="row2" style="margin-top:8px">
-  <label class="field">Rest of field: players left
-    <input type="text" id="ocount" inputmode="decimal" autocomplete="off" placeholder="optional"></label>
-  <label class="field">Average stack
+  <label class="field">Players remaining (incl. table)
+    <input type="text" id="remaining" inputmode="numeric" autocomplete="off" placeholder="optional"></label>
+  <label class="field">Average stack (whole field)
     <input type="text" id="oavg" inputmode="decimal" autocomplete="off" placeholder="optional"></label>
 </div>
 
@@ -108,7 +111,13 @@ footer { margin-top: 24px; color: var(--muted); font-size: 12px; text-align: cen
 <div class="seg" id="presets">
   <button class="chip" type="button" data-p="wta">Winner takes all</button>
   <button class="chip" type="button" data-p="top3">50 / 30 / 20</button>
-  <button class="chip" type="button" data-p="p15">15% paid</button>
+  <button class="chip" type="button" data-p="typ">Typical field</button>
+</div>
+<div class="row2" style="margin-top:8px">
+  <label class="field">Entrants (whole field)
+    <input type="text" id="entrants" inputmode="numeric" autocomplete="off" placeholder="e.g. 600"></label>
+  <label class="field">Places paid, % of field
+    <input type="text" id="paidpct" inputmode="decimal" autocomplete="off" placeholder="12"></label>
 </div>
 
 <div class="seg">
@@ -126,8 +135,8 @@ footer { margin-top: 24px; color: var(--muted); font-size: 12px; text-align: cen
 const NSEATS = 9, KEY = "deicm.v1";
 const $ = (id) => document.getElementById(id);
 const state = {
-  seats: Array(NSEATS).fill(""), hero: 0, ocount: "", oavg: "",
-  mode: "pct", pool: "", pot: "", pay: ""
+  seats: Array(NSEATS).fill(""), hero: 0, remaining: "", oavg: "",
+  mode: "pct", pool: "", pot: "", pay: "", entrants: "", paidpct: ""
 };
 
 /* ---------- storage ---------- */
@@ -135,10 +144,10 @@ function load() {
   try {
     const s = JSON.parse(localStorage.getItem(KEY) || "null");
     if (s && typeof s === "object") {
-      if (Array.isArray(s.seats)) state.seats = Array.from({length: NSEATS}, (_, i) => String(s.seats[i] ?? ""));
-      for (const k of ["ocount", "oavg", "pool", "pot", "pay"]) if (typeof s[k] === "string") state[k] = s[k];
+      if (Array.isArray(s.seats) && s.seats.length >= 2) state.seats = s.seats.slice(0, NSEATS).map((x) => String(x ?? ""));
+      for (const k of ["remaining", "oavg", "pool", "pot", "pay", "entrants", "paidpct"]) if (typeof s[k] === "string") state[k] = s[k];
       if (s.mode === "pct" || s.mode === "amt") state.mode = s.mode;
-      if (Number.isInteger(s.hero) && s.hero >= 0 && s.hero < NSEATS) state.hero = s.hero;
+      if (Number.isInteger(s.hero) && s.hero >= 0 && s.hero < state.seats.length) state.hero = s.hero;
     }
   } catch (e) { /* storage unavailable: start empty */ }
 }
@@ -170,12 +179,13 @@ function heat(v) {
 function buildSeats() {
   const box = $("seats");
   box.innerHTML = "";
-  for (let i = 0; i < NSEATS; i++) {
+  for (let i = 0; i < state.seats.length; i++) {
     const row = document.createElement("div");
     row.className = "seat";
     row.innerHTML = `<span class="no num">${i + 1}</span>
       <input type="text" inputmode="decimal" autocomplete="off" aria-label="Seat ${i + 1} stack" placeholder="stack" data-i="${i}">
-      <button type="button" class="hero-pick" role="radio" data-h="${i}" aria-label="Seat ${i + 1} is hero">Hero</button>`;
+      <button type="button" class="hero-pick" role="radio" data-h="${i}" aria-label="Seat ${i + 1} is hero">Hero</button>
+      <button type="button" class="seat-x" data-x="${i}" aria-label="Remove seat ${i + 1}">&times;</button>`;
     box.appendChild(row);
   }
   box.querySelectorAll("input").forEach((el) => {
@@ -183,7 +193,19 @@ function buildSeats() {
     el.addEventListener("input", () => { state.seats[+el.dataset.i] = el.value; changed(); });
   });
   box.querySelectorAll(".hero-pick").forEach((b) => b.addEventListener("click", () => { state.hero = +b.dataset.h; syncHero(); changed(); }));
+  box.querySelectorAll(".seat-x").forEach((b) => b.addEventListener("click", () => removeSeat(+b.dataset.x)));
+  $("add-seat").disabled = state.seats.length >= NSEATS;
   syncHero();
+}
+function removeSeat(i) {
+  if (state.seats.length <= 2) return;  /* the table needs two stacks */
+  state.seats.splice(i, 1);
+  if (state.hero > i || state.hero >= state.seats.length) state.hero = Math.max(0, state.hero - 1);
+  buildSeats(); changed();
+}
+function addSeat() {
+  if (state.seats.length >= NSEATS) return;
+  state.seats.push(""); buildSeats(); changed();
 }
 function syncHero() {
   document.querySelectorAll(".hero-pick").forEach((b) => b.setAttribute("aria-checked", String(+b.dataset.h === state.hero)));
@@ -203,18 +225,25 @@ function bindField(id, key) {
 
 function fieldSize() {
   const seated = state.seats.filter((s) => num(s) > 0).length;
-  const oc = Math.floor(num(state.ocount));
-  return seated + (oc > 0 ? oc : 0);
+  const rem = Math.floor(num(state.remaining));
+  return rem > seated ? rem : seated;
 }
-function applyPreset(p) {
+/* Typical-field payouts come from the server's model (deicm/payouts.py), fitted to recent Austin series. */
+async function applyPreset(p) {
   state.mode = "pct";
   if (p === "wta") state.pay = "100";
   else if (p === "top3") state.pay = "50 30 20";
   else {
-    const places = Math.max(2, Math.round(fieldSize() * 0.15));
-    const w = Array.from({length: places}, (_, i) => 1 / Math.pow(i + 1, 0.85));
-    const tot = w.reduce((a, b) => a + b, 0);
-    state.pay = w.map((x) => (100 * x / tot).toFixed(2)).join(" ");
+    const entrants = Math.floor(num(state.entrants)) || fieldSize();
+    const paid = num(state.paidpct) > 0 ? num(state.paidpct) : 12;
+    try {
+      const r = await fetch(`/api/payouts?entrants=${entrants}&paid_pct=${paid}`);
+      if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+      state.pay = (await r.json()).percent.map((x) => x.toFixed(3)).join(" ");
+    } catch (e) {
+      $("out").innerHTML = `<p class="err">Could not build payouts: ${esc(e.message)}</p>`;
+      return;
+    }
   }
   $("pay").value = state.pay;
   syncMode(); changed();
@@ -239,9 +268,21 @@ function buildRequest() {
   const pot = state.pot.trim() === "" ? 0 : num(state.pot);
   if (!(pot >= 0)) return {error: "Pot must be zero or more."};
   const body = {stacks, prizes, hero, pot};
-  const oc = Math.floor(num(state.ocount)), oa = num(state.oavg);
-  if (oc > 0 && oa > 0) body.others = {count: oc, average: oa};
-  else if (state.ocount.trim() !== "" || state.oavg.trim() !== "") return {hint: "Rest of field needs both a count and an average, or leave both blank."};
+  /* Players remaining and the average stack cover the whole field, as the clock shows them;
+     everyone not seated above is modelled at the average of the chips left over. */
+  const rem = Math.floor(num(state.remaining)), avg = num(state.oavg);
+  if (state.remaining.trim() !== "" || state.oavg.trim() !== "") {
+    if (!(rem > 0 && avg > 0)) return {hint: "Players remaining needs an average stack too, or leave both blank."};
+    if (rem < stacks.length) return {error: `Players remaining (${rem}) is fewer than the ${stacks.length} stacks entered.`};
+    if (rem > stacks.length) {
+      const rest = avg * rem - stacks.reduce((a, b) => a + b, 0);
+      if (!(rest > 0)) return {error: "The stacks entered hold more chips than players remaining x average stack."};
+      body.others = {count: rem - stacks.length, average: rest / (rem - stacks.length)};
+    }
+  }
+  /* Places below the players still in have already been paid out: only the top ones are still at stake. */
+  const inPlay = stacks.length + (body.others ? body.others.count : 0);
+  if (body.prizes.length > inPlay) body.prizes = body.prizes.slice(0, inPlay);
   return {body, seatNo};
 }
 
@@ -290,9 +331,9 @@ function render(d, seatNo, rtt) {
     h += `<div class="opp"><button type="button" aria-expanded="false">
       <span class="who"><b>${label(o.seat)}</b><span class="num">${chips(o.stack)} chips</span></span>
       <span class="cell you num" style="background:${yn.bg};color:${yn.fg}">${pct(o.you_need)}<small>you need</small></span>
+      <span class="cell bf num">${bfmt(o.your_bf)}<small>your BF</small></span>
       <span class="cell num" style="background:${tn.bg};color:${tn.fg}">${pct(o.they_need)}<small>they need</small></span>
       </button><div class="detail"><dl class="num">
-      <dt>Your bubble factor</dt><dd>${bfmt(o.your_bf)}</dd>
       <dt>Their bubble factor</dt><dd>${bfmt(o.their_bf)}</dd>
       <dt>You gain if you win</dt><dd class="pos">${o.you_gain == null ? "-" : "+" + money(o.you_gain)}</dd>
       <dt>You lose if you lose</dt><dd class="neg">${o.you_lose == null ? "-" : "-" + money(o.you_lose)}</dd>
@@ -352,11 +393,8 @@ function applyPrefill(pf) {
   if (pf.prizes && pf.prizes.length) { state.mode = "amt"; state.pay = pf.prizes.join(" "); $("pay").value = state.pay; syncMode(); }
   if (pf.pot != null) { state.pot = String(pf.pot); $("pot").value = state.pot; }
   if (pf.players_remaining != null && pf.average_stack != null) {
-    const seated = state.seats.filter((s) => num(s) > 0).length || NSEATS;
-    const count = pf.players_remaining - seated;
-    if (count > 0) { state.ocount = String(count); state.oavg = String(pf.average_stack); }
-    else { state.ocount = ""; state.oavg = ""; }
-    $("ocount").value = state.ocount; $("oavg").value = state.oavg;
+    state.remaining = String(pf.players_remaining); state.oavg = String(pf.average_stack);
+    $("remaining").value = state.remaining; $("oavg").value = state.oavg;
   }
 }
 function showReview(s) {
@@ -400,8 +438,10 @@ $("photo").addEventListener("change", async () => {
 /* ---------- init ---------- */
 load();
 buildSeats();
-bindField("ocount", "ocount"); bindField("oavg", "oavg");
+$("add-seat").addEventListener("click", addSeat);
+bindField("remaining", "remaining"); bindField("oavg", "oavg");
 bindField("pool", "pool"); bindField("pot", "pot"); bindField("pay", "pay");
+bindField("entrants", "entrants"); bindField("paidpct", "paidpct");
 syncMode();
 $("m-pct").addEventListener("click", () => { state.mode = "pct"; syncMode(); changed(); });
 $("m-amt").addEventListener("click", () => { state.mode = "amt"; syncMode(); changed(); });

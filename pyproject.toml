@@ -28,4 +28,7 @@ packages = ["deicm"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-m 'not slow'"
-markers = ["slow: n = 2000 validation cases (run with: pytest -m slow)"]
+markers = [
+    "slow: n = 2000 validation cases (run with: pytest -m slow)",
+    "deploy: smoke tests against DEICM_URL (run by scripts/deploy.sh)",
+]

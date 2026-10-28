@@ -17,12 +17,13 @@ from pathlib import Path
 
 import logging
 
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field, model_validator
 
 from deicm.core import icm
+from deicm.payouts import payout_table
 from deicm.web.extract import RefusalError, derive_prefill, extract_state
 from deicm.perturb import allin, bubble_factors
 
@@ -195,6 +196,10 @@ def create_app() -> FastAPI:
     def table(req: TableRequest) -> dict:
         return compute_table(req)
 
+    @app.get("/api/payouts")
+    def payouts(entrants: int = Query(ge=2, le=100_000), paid_pct: float = Query(default=12.0, gt=0, le=100)) -> dict:
+        frac = payout_table(entrants, paid_pct / 100)
+        return {"entrants": entrants, "places_paid": len(frac), "percent": [100 * x for x in frac]}
 
     @app.post("/api/extract")
     def extract(image: UploadFile = File(...)) -> dict:

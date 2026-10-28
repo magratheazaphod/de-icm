@@ -141,7 +141,7 @@ Deploy to Fly.io (stateless, stops itself when idle):
 
 ```bash
 fly launch --copy-config --no-deploy
-fly secrets set AUTH_USERS=user:pass
+fly secrets set AUTH_USERS=user:pass ANTHROPIC_API_KEY=...   # the key enables photo import
 fly deploy
 ```
 

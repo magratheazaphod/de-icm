@@ -68,6 +68,13 @@ def test_payouts(client):
 
 
 @pytest.mark.skipif(not AUTH, reason="set DEICM_AUTH=user:pass")
+def test_storage_is_configured(client):
+    # 503 here means DEICM_DB is unset or the volume is missing.
+    for path in ("/api/tournaments", "/api/scenarios", "/api/players", "/api/observations"):
+        assert client.get(path).status_code == 200, path
+
+
+@pytest.mark.skipif(not AUTH, reason="set DEICM_AUTH=user:pass")
 def test_photo_import_is_configured(client):
     # A non-image upload is rejected with 422 when the API key is set, 503 when it is not.
     r = client.post("/api/extract", files={"image": ("x.txt", b"hello", "text/plain")})

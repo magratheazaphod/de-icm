@@ -1,0 +1,14 @@
+# Continuous backup of the app database to a private S3-compatible bucket (Tigris on Fly).
+# `fly storage create` sets BUCKET_NAME, AWS_ENDPOINT_URL_S3 and the AWS_* keys as app secrets.
+dbs:
+  - path: ${DEICM_DB}
+    replicas:
+      - type: s3
+        bucket: ${BUCKET_NAME}
+        path: deicm.db
+        endpoint: ${AWS_ENDPOINT_URL_S3}
+        region: auto
+        force-path-style: true
+        sync-interval: 1s
+        snapshot-interval: 24h
+        retention: 720h

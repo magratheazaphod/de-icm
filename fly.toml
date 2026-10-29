@@ -5,10 +5,18 @@ primary_region = "dfw"
 
 [build]
 
+[env]
+  DEICM_DB = "/data/deicm.db"
+
+# One volume, so one machine: the database lives here and Litestream copies it off-box.
+[mounts]
+  source = "deicm_data"
+  destination = "/data"
+
 [http_service]
   internal_port = 8080
   force_https = true
-  # Stateless and idle most of the time: let Fly stop the machine between sessions.
+  # Idle most of the time: let Fly stop the machine between sessions (Litestream flushes on stop).
   auto_stop_machines = "stop"
   auto_start_machines = true
   min_machines_running = 0

@@ -12,12 +12,14 @@ import binascii
 import math
 import os
 import secrets
+import sqlite3
 import time
-from pathlib import Path
+from pathlib import Path as FilePath
+from typing import Annotated
 
 import logging
 
-from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
+from fastapi import FastAPI, File, HTTPException, Path, Query, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field, model_validator
@@ -25,9 +27,10 @@ from pydantic import BaseModel, Field, model_validator
 from deicm.core import icm
 from deicm.payouts import payout_table
 from deicm.web.extract import RefusalError, derive_prefill, extract_state
+from deicm.web.store import Store
 from deicm.perturb import allin, bubble_factors
 
-INDEX_HTML = Path(__file__).parent / "static" / "index.html"
+INDEX_HTML = FilePath(__file__).parent / "static" / "index.html"
 MAX_PLAYERS = 4000
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
@@ -58,6 +61,52 @@ class TableRequest(BaseModel):
         if len(self.stacks) + extra > MAX_PLAYERS:
             raise ValueError(f"at most {MAX_PLAYERS} players in total")
         return self
+
+
+Rate = Field(default=None, ge=0, le=1, allow_inf_nan=False)
+RecordId = Annotated[str, Path(pattern=r"^[A-Za-z0-9-]{8,64}$")]
+
+
+class Write(BaseModel):
+    """Every stored write carries the phone's clock, so stale retries lose (last write wins)."""
+
+    client_ts: float = Field(ge=0, allow_inf_nan=False)
+
+
+class TournamentIn(Write):
+    name: str = Field(min_length=1, max_length=120)
+    venue: str = Field(default="", max_length=120)
+    start_date: str = Field(default="", max_length=10)
+    buy_in: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    entrants: int | None = Field(default=None, ge=2, le=100_000)
+    paid_pct: float | None = Field(default=None, gt=0, le=100, allow_inf_nan=False)
+    notes: str = Field(default="", max_length=4000)
+    live: dict | None = None  # mid-tournament snapshot: level, players left, average stack, ...
+
+
+class ScenarioIn(Write):
+    tournament_id: str | None = None
+    title: str = Field(min_length=1, max_length=200)
+    note: str = Field(default="", max_length=4000)
+    input: dict  # the page state, stored as given
+
+
+class PlayerIn(Write):
+    nickname: str = Field(min_length=1, max_length=80)
+    description: str = Field(default="", max_length=400)
+    archetype: str = Field(default="", max_length=80)
+    notes: str = Field(default="", max_length=8000)
+    fold_to_cbet: float | None = Rate
+    raise_vs_cbet: float | None = Rate
+    re_jam_rate: float | None = Rate
+    fold_to_iso: float | None = Rate
+
+
+class ObservationIn(BaseModel):
+    player_id: str
+    tournament_id: str | None = None
+    text: str = Field(min_length=1, max_length=2000)
+    seen_at: float = Field(ge=0, allow_inf_nan=False)
 
 
 def _num(x: float) -> float | None:
@@ -155,6 +204,13 @@ def _authorized(header: str | None, users: dict[str, str]) -> bool:
 def create_app() -> FastAPI:
     app = FastAPI(title="DE-ICM", docs_url=None, redoc_url=None, openapi_url=None)
     users = _parse_users(os.environ.get("AUTH_USERS"))
+    db_path = os.environ.get("DEICM_DB")
+    store = Store(db_path) if db_path else None
+
+    def db() -> Store:
+        if store is None:
+            raise HTTPException(503, "Saving is not configured on this server (DEICM_DB is not set).")
+        return store
 
     if users:
 
@@ -179,6 +235,17 @@ def create_app() -> FastAPI:
             msgs.append(f"{loc}: {msg}" if loc else msg)
         return JSONResponse({"detail": "; ".join(msgs)}, status_code=422)
 
+    @app.exception_handler(sqlite3.IntegrityError)
+    async def _conflict(request: Request, exc: sqlite3.IntegrityError):
+        msg = str(exc)
+        if "UNIQUE" in msg and "players.nickname" in msg:
+            msg = "A player with that nickname already exists."
+        elif "FOREIGN KEY" in msg:
+            msg = "It refers to a tournament or player that does not exist."
+        elif "NOT NULL" in msg:
+            msg = "A required field is missing."
+        return JSONResponse({"detail": msg}, status_code=409)
+
     @app.exception_handler(ValueError)
     async def _value_error(request: Request, exc: ValueError):
         return JSONResponse({"detail": str(exc)}, status_code=422)
@@ -186,6 +253,8 @@ def create_app() -> FastAPI:
     @app.get("/healthz")
     def healthz() -> dict:
         icm([1.0, 2.0], [1.0])  # a broken numpy import fails the check
+        if store is not None:
+            store.ping()  # so does a missing or unreadable volume
         return {"ok": True}
 
     @app.get("/", response_class=HTMLResponse)
@@ -200,6 +269,74 @@ def create_app() -> FastAPI:
     def payouts(entrants: int = Query(ge=2, le=100_000), paid_pct: float = Query(default=12.0, gt=0, le=100)) -> dict:
         frac = payout_table(entrants, paid_pct / 100)
         return {"entrants": entrants, "places_paid": len(frac), "percent": [100 * x for x in frac]}
+
+    # ---------- saved data: idempotent PUT/DELETE by phone-generated ids ----------
+
+    def _put(table: str, row_id: str, body: Write) -> dict:
+        return db().put(table, row_id, body.model_dump(exclude={"client_ts"}), body.client_ts)
+
+    def _delete(table: str, row_id: str) -> Response:
+        db().delete(table, row_id)
+        return Response(status_code=204)
+
+    @app.get("/api/tournaments")
+    def tournaments() -> list[dict]:
+        return db().tournaments()
+
+    @app.put("/api/tournaments/{tid}")
+    def put_tournament(t: TournamentIn, tid: RecordId) -> dict:
+        return _put("tournaments", tid, t)
+
+    @app.delete("/api/tournaments/{tid}", status_code=204)
+    def delete_tournament(tid: RecordId) -> Response:
+        return _delete("tournaments", tid)  # its spots stay, unfiled
+
+    @app.get("/api/scenarios")
+    def scenarios(tournament_id: str | None = None, unfiled: bool = False) -> list[dict]:
+        if unfiled:
+            return db().list("scenarios", tournament_id=None)
+        if tournament_id:
+            return db().list("scenarios", tournament_id=tournament_id)
+        return db().list("scenarios")
+
+    @app.put("/api/scenarios/{sid}")
+    def put_scenario(sc: ScenarioIn, sid: RecordId) -> dict:
+        return _put("scenarios", sid, sc)
+
+    @app.delete("/api/scenarios/{sid}", status_code=204)
+    def delete_scenario(sid: RecordId) -> Response:
+        return _delete("scenarios", sid)
+
+    @app.get("/api/players")
+    def players() -> list[dict]:
+        return db().list("players")
+
+    @app.put("/api/players/{pid}")
+    def put_player(pl: PlayerIn, pid: RecordId) -> dict:
+        return _put("players", pid, pl)
+
+    @app.delete("/api/players/{pid}", status_code=204)
+    def delete_player(pid: RecordId) -> Response:
+        return _delete("players", pid)  # and its observations
+
+    @app.get("/api/observations")
+    def observations(player_id: str | None = None, tournament_id: str | None = None) -> list[dict]:
+        where = {k: v for k, v in (("player_id", player_id), ("tournament_id", tournament_id)) if v}
+        return db().list("observations", **where)
+
+    @app.put("/api/observations/{oid}")
+    def put_observation(ob: ObservationIn, oid: RecordId) -> dict:
+        return db().observe(oid, ob.player_id, ob.text, ob.seen_at, ob.tournament_id)
+
+    @app.delete("/api/observations/{oid}", status_code=204)
+    def delete_observation(oid: RecordId) -> Response:
+        return _delete("observations", oid)
+
+    @app.get("/api/export")
+    def export() -> JSONResponse:
+        return JSONResponse(
+            db().export(), headers={"Content-Disposition": 'attachment; filename="deicm-export.json"'}
+        )
 
     @app.post("/api/extract")
     def extract(image: UploadFile = File(...)) -> dict:

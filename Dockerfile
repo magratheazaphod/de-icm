@@ -11,8 +11,13 @@ COPY pyproject.toml uv.lock README.md LICENSE ./
 COPY deicm ./deicm
 RUN uv sync --frozen --no-dev --extra web
 
+# Litestream streams the SQLite database to the backup bucket (deploy/litestream.yml).
+COPY --from=litestream/litestream:0.3.13 /usr/local/bin/litestream /usr/local/bin/litestream
+COPY deploy/litestream.yml /etc/litestream.yml
+COPY deploy/start.sh /usr/local/bin/start.sh
+
+# start.sh drops from root to this user once the data volume is owned by it.
 RUN useradd --system --create-home --uid 10001 app
-USER app
 
 EXPOSE 8080
-CMD ["deicm-web"]
+CMD ["start.sh"]

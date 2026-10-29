@@ -137,13 +137,34 @@ uv run deicm-web          # http://localhost:8080, or set $PORT
 The library install stays numpy-only; FastAPI and uvicorn live in the optional `web` extra.
 Set `AUTH_USERS=user:pass,user:pass` to require HTTP basic auth on everything except `/healthz`.
 
-Deploy to Fly.io (stateless, stops itself when idle):
+### Saved spots, tournaments and players
+
+Set `DEICM_DB=/path/to/deicm.db` to turn on saving: spots grouped by tournament, a live
+snapshot per tournament (players left, average stack), and player notes as an append-only
+log of observations. Without it the app is stateless and those routes answer 503.
+
+Saving is built for a card room with patchy signal. Every write goes to an outbox on the
+phone first and is then sent as an idempotent `PUT` or `DELETE` keyed by an id made on the
+phone. Writes carry the phone's clock and the server keeps the newest, so a retry that
+arrives late never undoes a newer edit. `GET /api/export` downloads everything as JSON.
+
+On Fly the database sits on a volume (`/data`, one machine) and Litestream streams it to a
+private Tigris bucket within about a second of each write (`deploy/litestream.yml`). An
+empty volume is restored from the bucket at boot (`deploy/start.sh`). Player notes are
+about real people: they live only in the database and its backups, never in this repository.
+
+### Deploy to Fly.io
 
 ```bash
 fly launch --copy-config --no-deploy
-fly secrets set AUTH_USERS=user:pass ANTHROPIC_API_KEY=...   # the key enables photo import
-fly deploy
+fly volumes create deicm_data -r dfw -s 1
+fly storage create -n deicm-backup                            # sets BUCKET_NAME and the AWS_* secrets
+fly secrets set AUTH_USERS=user:pass ANTHROPIC_API_KEY=...    # the key enables photo import
+DEICM_AUTH=user:pass scripts/deploy.sh                        # tests, deploy, smoke tests
 ```
+
+To copy the live database to this machine for analysis, with the bucket credentials in the
+environment: `litestream restore -config deploy/litestream.yml -o deicm.db /data/deicm.db`.
 
 ## Accuracy
 

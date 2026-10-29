@@ -1,0 +1,10 @@
+#!/bin/sh
+# Changes reach main only through PRs (see CLAUDE.md). GitHub branch protection enforces this
+# too; the hook catches a direct push locally first.
+while read -r local_ref local_sha remote_ref remote_sha; do
+    if [ "$remote_ref" = "refs/heads/main" ]; then
+        echo "pre-push: direct pushes to main are blocked; open a PR from a branch instead." >&2
+        exit 1
+    fi
+done
+exit 0

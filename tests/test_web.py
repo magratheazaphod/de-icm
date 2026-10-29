@@ -199,3 +199,27 @@ def test_extract_error_mapping(client, monkeypatch):
     for exc in (rl, st, cn):
         monkeypatch.setattr(appmod, "extract_state", raiser(exc))
         assert client.post("/api/extract", files=files).status_code == 502
+
+
+def test_payouts_endpoint(client):
+    r = client.get("/api/payouts", params={"entrants": 582, "paid_pct": 12.2})
+    assert r.status_code == 200
+    d = r.json()
+    assert d["places_paid"] == 71 and len(d["percent"]) == 71
+    assert sum(d["percent"]) == pytest.approx(100)
+
+
+def test_payouts_endpoint_validates(client):
+    assert client.get("/api/payouts", params={"entrants": 1}).status_code == 422
+    assert client.get("/api/payouts", params={"entrants": 100, "paid_pct": 0}).status_code == 422
+
+
+def test_index_shows_bubble_factor_beside_you_need(client):
+    html = client.get("/").text
+    assert html.index("you need</small>") < html.index("your BF</small>") < html.index("they need</small>")
+
+
+def test_satellite_bubble_is_extreme(client):
+    body = {"stacks": [10] * 8 + [5, 15], "prizes": [1] * 9, "hero": 0}
+    opp = next(o for o in client.post("/api/table", json=body).json()["opponents"] if o["seat"] == 1)
+    assert opp["you_need"] == pytest.approx(0.916, abs=1e-3)

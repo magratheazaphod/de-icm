@@ -30,7 +30,7 @@ input[type=text] {
 input[type=text]:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 label.field { display: block; font-size: 13px; color: var(--muted); }
 label.field input { margin-top: 4px; color: var(--text); font-size: 16px; }
-.seat { display: grid; grid-template-columns: 44px 1fr 64px; gap: 8px; align-items: center; margin-bottom: 6px; }
+.seat { display: grid; grid-template-columns: 44px 1fr 64px 36px; gap: 8px; align-items: center; margin-bottom: 6px; }
 .seat .no { color: var(--muted); text-align: center; }
 .hero-pick {
   min-height: 44px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel);
@@ -52,12 +52,14 @@ label.field input { margin-top: 4px; color: var(--text); font-size: 16px; }
 .opp { width: 100%; text-align: left; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; margin-bottom: 6px; padding: 0; overflow: hidden; }
 .opp > button {
   all: unset; box-sizing: border-box; width: 100%; min-height: 48px; padding: 6px 10px; cursor: pointer;
-  display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center;
+  display: grid; grid-template-columns: 1fr auto auto auto; gap: 6px; align-items: center;
 }
 .opp .who b { font-weight: 600; } .opp .who span { display: block; color: var(--muted); font-size: 13px; }
-.cell { min-width: 70px; text-align: center; border-radius: 8px; padding: 6px 4px; font-weight: 600; }
+.cell { min-width: 62px; text-align: center; border-radius: 8px; padding: 6px 4px; font-weight: 600; }
 .cell small { display: block; font-weight: 400; font-size: 11px; opacity: .85; }
 .cell.you { box-shadow: inset 0 0 0 2px var(--accent); }
+.cell.bf { background: var(--line); }
+.seat-x { background: none; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); font-size: 20px; line-height: 1; height: 36px; }
 .detail { padding: 8px 12px 12px; border-top: 1px solid var(--line); font-size: 14px; display: none; }
 .opp.open .detail { display: block; }
 .detail dl { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; margin: 0; }
@@ -78,17 +80,43 @@ footer { margin-top: 24px; color: var(--muted); font-size: 12px; text-align: cen
 .review dt { color: var(--muted); } .review dd { margin: 0; text-align: right; }
 .review .close { float: right; min-height: 44px; min-width: 44px; background: none; border: 0; color: var(--muted); font-size: 20px; cursor: pointer; }
 #out.stale { opacity: .55; }
+.tabs { position: sticky; top: 0; z-index: 2; background: var(--bg); padding: 6px 0; margin: 0 0 4px; }
+.tabs .chip[aria-selected=true] { border-color: var(--accent); color: var(--accent); }
+#sync { margin-left: auto; align-self: center; font-size: 13px; color: var(--muted); }
+#sync.pending { color: var(--accent); }
+.pair { display: grid; grid-template-columns: 1.15fr 1fr; gap: 6px; }
+select { width: 100%; min-height: 44px; padding: 8px 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+textarea { width: 100%; min-height: 64px; padding: 8px 10px; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 8px; font: inherit; }
+.form { display: grid; gap: 8px; padding: 10px 12px 12px; }
+.list-item { padding: 10px 12px; border-top: 1px solid var(--line); }
+.list-item .meta { color: var(--muted); font-size: 13px; }
+.row-actions { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.row-actions .chip { min-height: 36px; padding: 0 12px; font-size: 13px; }
+.chip.danger { color: var(--bad); }
+.obs { font-size: 14px; padding: 4px 0; border-bottom: 1px dashed var(--line); }
+.obs .meta { color: var(--muted); font-size: 12px; }
 </style>
 </head>
 <body>
 <h1>DE-ICM table</h1>
+<nav class="seg tabs" role="tablist">
+  <button class="chip" role="tab" data-v="table" aria-selected="true" type="button">Table</button>
+  <button class="chip" role="tab" data-v="saved" aria-selected="false" type="button">Saved</button>
+  <button class="chip" role="tab" data-v="players" aria-selected="false" type="button">Players</button>
+  <span id="sync" aria-live="polite"></span>
+</nav>
+
+<section id="v-table">
+<label class="field">Tournament
+  <select id="cur-t"><option value="">None</option></select></label>
 
 <h2>Seats</h2>
 <div id="seats"></div>
+<button class="chip" id="add-seat" type="button">+ Add seat</button>
 <div class="row2" style="margin-top:8px">
-  <label class="field">Rest of field: players left
-    <input type="text" id="ocount" inputmode="decimal" autocomplete="off" placeholder="optional"></label>
-  <label class="field">Average stack
+  <label class="field">Players remaining (incl. table)
+    <input type="text" id="remaining" inputmode="numeric" autocomplete="off" placeholder="optional"></label>
+  <label class="field">Average stack (whole field)
     <input type="text" id="oavg" inputmode="decimal" autocomplete="off" placeholder="optional"></label>
 </div>
 
@@ -108,7 +136,13 @@ footer { margin-top: 24px; color: var(--muted); font-size: 12px; text-align: cen
 <div class="seg" id="presets">
   <button class="chip" type="button" data-p="wta">Winner takes all</button>
   <button class="chip" type="button" data-p="top3">50 / 30 / 20</button>
-  <button class="chip" type="button" data-p="p15">15% paid</button>
+  <button class="chip" type="button" data-p="typ">Typical field</button>
+</div>
+<div class="row2" style="margin-top:8px">
+  <label class="field">Entrants (whole field)
+    <input type="text" id="entrants" inputmode="numeric" autocomplete="off" placeholder="e.g. 600"></label>
+  <label class="field">Places paid, % of field
+    <input type="text" id="paidpct" inputmode="decimal" autocomplete="off" placeholder="12"></label>
 </div>
 
 <div class="seg">
@@ -119,15 +153,57 @@ footer { margin-top: 24px; color: var(--muted); font-size: 12px; text-align: cen
 <div id="review" aria-live="polite"></div>
 
 <div id="out" aria-live="polite"></div>
+<details id="save-box"><summary>Save this spot</summary>
+  <div class="form">
+    <label class="field">Title<input type="text" id="sv-title" autocomplete="off" placeholder="e.g. Bubble, 12bb vs chip leader jam"></label>
+    <label class="field">Note<textarea id="sv-note" placeholder="optional"></textarea></label>
+    <button class="chip" id="sv-go" type="button">Save spot</button>
+    <span class="hint" id="sv-msg"></span>
+  </div>
+</details>
 <footer id="foot"></footer>
+</section>
+
+<section id="v-saved" hidden>
+<details><summary>New tournament</summary>
+  <div class="form">
+    <label class="field">Name<input type="text" id="nt-name" autocomplete="off" placeholder="PokerAtlas Tour $400 Main"></label>
+    <div class="row2">
+      <label class="field">Venue<input type="text" id="nt-venue" autocomplete="off" placeholder="TCH Social"></label>
+      <label class="field">Start date<input type="text" id="nt-date" autocomplete="off" placeholder="2026-11-10"></label>
+    </div>
+    <div class="row2">
+      <label class="field">Buy-in<input type="text" id="nt-buyin" inputmode="decimal" autocomplete="off"></label>
+      <label class="field">Entrants<input type="text" id="nt-entrants" inputmode="numeric" autocomplete="off" placeholder="if known"></label>
+    </div>
+    <label class="field">Places paid, % of field<input type="text" id="nt-paid" inputmode="decimal" autocomplete="off" placeholder="12"></label>
+    <button class="chip" id="nt-go" type="button">Add tournament</button>
+  </div>
+</details>
+<div id="saved-list"></div>
+<p class="hint"><a href="/api/export" style="color:var(--muted)">Download everything (JSON)</a></p>
+</section>
+
+<section id="v-players" hidden>
+<input type="text" id="pl-search" autocomplete="off" placeholder="Search players">
+<details><summary>Add player</summary>
+  <div class="form">
+    <label class="field">Nickname<input type="text" id="np-nick" autocomplete="off" placeholder="e.g. Red Hat Mike"></label>
+    <label class="field">How to recognise them<input type="text" id="np-desc" autocomplete="off" placeholder="red hat, Lodge regular"></label>
+    <button class="chip" id="np-go" type="button">Add player</button>
+  </div>
+</details>
+<div id="players-list"></div>
+</section>
+<datalist id="player-names"></datalist>
 
 <script>
 "use strict";
 const NSEATS = 9, KEY = "deicm.v1";
 const $ = (id) => document.getElementById(id);
 const state = {
-  seats: Array(NSEATS).fill(""), hero: 0, ocount: "", oavg: "",
-  mode: "pct", pool: "", pot: "", pay: ""
+  seats: Array(NSEATS).fill(""), hero: 0, remaining: "", oavg: "",
+  mode: "pct", pool: "", pot: "", pay: "", entrants: "", paidpct: "", names: Array(NSEATS).fill(""), tid: ""
 };
 
 /* ---------- storage ---------- */
@@ -135,10 +211,12 @@ function load() {
   try {
     const s = JSON.parse(localStorage.getItem(KEY) || "null");
     if (s && typeof s === "object") {
-      if (Array.isArray(s.seats)) state.seats = Array.from({length: NSEATS}, (_, i) => String(s.seats[i] ?? ""));
-      for (const k of ["ocount", "oavg", "pool", "pot", "pay"]) if (typeof s[k] === "string") state[k] = s[k];
+      if (Array.isArray(s.seats) && s.seats.length >= 2) state.seats = s.seats.slice(0, NSEATS).map((x) => String(x ?? ""));
+      state.names = state.seats.map((_, i) => String((Array.isArray(s.names) && s.names[i]) || ""));
+      if (typeof s.tid === "string") state.tid = s.tid;
+      for (const k of ["remaining", "oavg", "pool", "pot", "pay", "entrants", "paidpct"]) if (typeof s[k] === "string") state[k] = s[k];
       if (s.mode === "pct" || s.mode === "amt") state.mode = s.mode;
-      if (Number.isInteger(s.hero) && s.hero >= 0 && s.hero < NSEATS) state.hero = s.hero;
+      if (Number.isInteger(s.hero) && s.hero >= 0 && s.hero < state.seats.length) state.hero = s.hero;
     }
   } catch (e) { /* storage unavailable: start empty */ }
 }
@@ -170,20 +248,40 @@ function heat(v) {
 function buildSeats() {
   const box = $("seats");
   box.innerHTML = "";
-  for (let i = 0; i < NSEATS; i++) {
+  for (let i = 0; i < state.seats.length; i++) {
     const row = document.createElement("div");
     row.className = "seat";
     row.innerHTML = `<span class="no num">${i + 1}</span>
-      <input type="text" inputmode="decimal" autocomplete="off" aria-label="Seat ${i + 1} stack" placeholder="stack" data-i="${i}">
-      <button type="button" class="hero-pick" role="radio" data-h="${i}" aria-label="Seat ${i + 1} is hero">Hero</button>`;
+      <span class="pair"><input type="text" inputmode="decimal" autocomplete="off" aria-label="Seat ${i + 1} stack" placeholder="stack" data-i="${i}">
+      <input type="text" autocomplete="off" list="player-names" aria-label="Seat ${i + 1} player" placeholder="player" data-n="${i}"></span>
+      <button type="button" class="hero-pick" role="radio" data-h="${i}" aria-label="Seat ${i + 1} is hero">Hero</button>
+      <button type="button" class="seat-x" data-x="${i}" aria-label="Remove seat ${i + 1}">&times;</button>`;
     box.appendChild(row);
   }
-  box.querySelectorAll("input").forEach((el) => {
+  box.querySelectorAll("input[data-i]").forEach((el) => {
     el.value = state.seats[+el.dataset.i];
     el.addEventListener("input", () => { state.seats[+el.dataset.i] = el.value; changed(); });
   });
+  box.querySelectorAll("input[data-n]").forEach((el) => {
+    el.value = state.names[+el.dataset.n] || "";
+    el.addEventListener("input", () => { state.names[+el.dataset.n] = el.value; save(); });
+    el.addEventListener("change", () => { changed(); });
+  });
   box.querySelectorAll(".hero-pick").forEach((b) => b.addEventListener("click", () => { state.hero = +b.dataset.h; syncHero(); changed(); }));
+  box.querySelectorAll(".seat-x").forEach((b) => b.addEventListener("click", () => removeSeat(+b.dataset.x)));
+  $("add-seat").disabled = state.seats.length >= NSEATS;
   syncHero();
+}
+function removeSeat(i) {
+  if (state.seats.length <= 2) return;  /* the table needs two stacks */
+  state.seats.splice(i, 1);
+  state.names.splice(i, 1);
+  if (state.hero > i || state.hero >= state.seats.length) state.hero = Math.max(0, state.hero - 1);
+  buildSeats(); changed();
+}
+function addSeat() {
+  if (state.seats.length >= NSEATS) return;
+  state.seats.push(""); state.names.push(""); buildSeats(); changed();
 }
 function syncHero() {
   document.querySelectorAll(".hero-pick").forEach((b) => b.setAttribute("aria-checked", String(+b.dataset.h === state.hero)));
@@ -203,18 +301,25 @@ function bindField(id, key) {
 
 function fieldSize() {
   const seated = state.seats.filter((s) => num(s) > 0).length;
-  const oc = Math.floor(num(state.ocount));
-  return seated + (oc > 0 ? oc : 0);
+  const rem = Math.floor(num(state.remaining));
+  return rem > seated ? rem : seated;
 }
-function applyPreset(p) {
+/* Typical-field payouts come from the server's model (deicm/payouts.py), fitted to recent Austin series. */
+async function applyPreset(p) {
   state.mode = "pct";
   if (p === "wta") state.pay = "100";
   else if (p === "top3") state.pay = "50 30 20";
   else {
-    const places = Math.max(2, Math.round(fieldSize() * 0.15));
-    const w = Array.from({length: places}, (_, i) => 1 / Math.pow(i + 1, 0.85));
-    const tot = w.reduce((a, b) => a + b, 0);
-    state.pay = w.map((x) => (100 * x / tot).toFixed(2)).join(" ");
+    const entrants = Math.floor(num(state.entrants)) || fieldSize();
+    const paid = num(state.paidpct) > 0 ? num(state.paidpct) : 12;
+    try {
+      const r = await fetch(`/api/payouts?entrants=${entrants}&paid_pct=${paid}`);
+      if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+      state.pay = (await r.json()).percent.map((x) => x.toFixed(3)).join(" ");
+    } catch (e) {
+      $("out").innerHTML = `<p class="err">Could not build payouts: ${esc(e.message)}</p>`;
+      return;
+    }
   }
   $("pay").value = state.pay;
   syncMode(); changed();
@@ -239,9 +344,21 @@ function buildRequest() {
   const pot = state.pot.trim() === "" ? 0 : num(state.pot);
   if (!(pot >= 0)) return {error: "Pot must be zero or more."};
   const body = {stacks, prizes, hero, pot};
-  const oc = Math.floor(num(state.ocount)), oa = num(state.oavg);
-  if (oc > 0 && oa > 0) body.others = {count: oc, average: oa};
-  else if (state.ocount.trim() !== "" || state.oavg.trim() !== "") return {hint: "Rest of field needs both a count and an average, or leave both blank."};
+  /* Players remaining and the average stack cover the whole field, as the clock shows them;
+     everyone not seated above is modelled at the average of the chips left over. */
+  const rem = Math.floor(num(state.remaining)), avg = num(state.oavg);
+  if (state.remaining.trim() !== "" || state.oavg.trim() !== "") {
+    if (!(rem > 0 && avg > 0)) return {hint: "Players remaining needs an average stack too, or leave both blank."};
+    if (rem < stacks.length) return {error: `Players remaining (${rem}) is fewer than the ${stacks.length} stacks entered.`};
+    if (rem > stacks.length) {
+      const rest = avg * rem - stacks.reduce((a, b) => a + b, 0);
+      if (!(rest > 0)) return {error: "The stacks entered hold more chips than players remaining x average stack."};
+      body.others = {count: rem - stacks.length, average: rest / (rem - stacks.length)};
+    }
+  }
+  /* Places below the players still in have already been paid out: only the top ones are still at stake. */
+  const inPlay = stacks.length + (body.others ? body.others.count : 0);
+  if (body.prizes.length > inPlay) body.prizes = body.prizes.slice(0, inPlay);
   return {body, seatNo};
 }
 
@@ -276,7 +393,7 @@ async function recompute() {
 
 /* ---------- output ---------- */
 function render(d, seatNo, rtt) {
-  const label = (j) => "Seat " + (seatNo[j] + 1);
+  const label = (j) => "Seat " + (seatNo[j] + 1) + (state.names[seatNo[j]] ? " \u00b7 " + esc(state.names[seatNo[j]]) : "");
   const me = d.seats[d.hero];
   const dm = me.delta, cls = dm >= 0 ? "pos" : "neg";
   let h = `<h2>You (${label(d.hero)})</h2><div class="card hero-line">
@@ -290,9 +407,9 @@ function render(d, seatNo, rtt) {
     h += `<div class="opp"><button type="button" aria-expanded="false">
       <span class="who"><b>${label(o.seat)}</b><span class="num">${chips(o.stack)} chips</span></span>
       <span class="cell you num" style="background:${yn.bg};color:${yn.fg}">${pct(o.you_need)}<small>you need</small></span>
+      <span class="cell bf num">${bfmt(o.your_bf)}<small>your BF</small></span>
       <span class="cell num" style="background:${tn.bg};color:${tn.fg}">${pct(o.they_need)}<small>they need</small></span>
       </button><div class="detail"><dl class="num">
-      <dt>Your bubble factor</dt><dd>${bfmt(o.your_bf)}</dd>
       <dt>Their bubble factor</dt><dd>${bfmt(o.their_bf)}</dd>
       <dt>You gain if you win</dt><dd class="pos">${o.you_gain == null ? "-" : "+" + money(o.you_gain)}</dd>
       <dt>You lose if you lose</dt><dd class="neg">${o.you_lose == null ? "-" : "-" + money(o.you_lose)}</dd>
@@ -352,11 +469,8 @@ function applyPrefill(pf) {
   if (pf.prizes && pf.prizes.length) { state.mode = "amt"; state.pay = pf.prizes.join(" "); $("pay").value = state.pay; syncMode(); }
   if (pf.pot != null) { state.pot = String(pf.pot); $("pot").value = state.pot; }
   if (pf.players_remaining != null && pf.average_stack != null) {
-    const seated = state.seats.filter((s) => num(s) > 0).length || NSEATS;
-    const count = pf.players_remaining - seated;
-    if (count > 0) { state.ocount = String(count); state.oavg = String(pf.average_stack); }
-    else { state.ocount = ""; state.oavg = ""; }
-    $("ocount").value = state.ocount; $("oavg").value = state.oavg;
+    state.remaining = String(pf.players_remaining); state.oavg = String(pf.average_stack);
+    $("remaining").value = state.remaining; $("oavg").value = state.oavg;
   }
 }
 function showReview(s) {
@@ -400,13 +514,275 @@ $("photo").addEventListener("change", async () => {
 /* ---------- init ---------- */
 load();
 buildSeats();
-bindField("ocount", "ocount"); bindField("oavg", "oavg");
+$("add-seat").addEventListener("click", addSeat);
+bindField("remaining", "remaining"); bindField("oavg", "oavg");
 bindField("pool", "pool"); bindField("pot", "pot"); bindField("pay", "pay");
+bindField("entrants", "entrants"); bindField("paidpct", "paidpct");
 syncMode();
 $("m-pct").addEventListener("click", () => { state.mode = "pct"; syncMode(); changed(); });
 $("m-amt").addEventListener("click", () => { state.mode = "amt"; syncMode(); changed(); });
 document.querySelectorAll("#presets .chip").forEach((b) => b.addEventListener("click", () => applyPreset(b.dataset.p)));
 recompute();
+
+/* ---------- saved data: local cache + outbox ----------
+   Every write goes to the outbox first (one pending entry per record, newest wins), then
+   to the server as an idempotent PUT/DELETE keyed by an id made here. Writes carry this
+   phone's clock, and the server ignores anything older than what it has, so a retry that
+   arrives late can never undo a newer edit. The cache lets the views work with no signal. */
+const OUTBOX = "deicm.outbox", CACHE = "deicm.cache";
+const db = {tournaments: [], scenarios: [], players: [], observations: []};
+let outbox = [], storageOff = false, flushing = false;
+const uid = () => (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + "-" + Math.random().toString(16).slice(2, 10));
+
+function loadLocal() {
+  try { outbox = JSON.parse(localStorage.getItem(OUTBOX) || "[]"); } catch (e) { outbox = []; }
+  try { Object.assign(db, JSON.parse(localStorage.getItem(CACHE) || "{}")); } catch (e) { /* start empty */ }
+}
+function saveLocal() {
+  try { localStorage.setItem(OUTBOX, JSON.stringify(outbox)); localStorage.setItem(CACHE, JSON.stringify(db)); } catch (e) { /* ignore */ }
+}
+function syncBadge(err) {
+  const el = $("sync");
+  if (storageOff) { el.textContent = "saving off"; el.className = ""; return; }
+  el.textContent = err ? err : outbox.length ? `${outbox.length} unsent` : "all saved";
+  el.className = outbox.length || err ? "pending" : "";
+}
+
+/* Apply a write to the cache now, queue it for the server. */
+function write(table, id, body) {
+  const rows = db[table], i = rows.findIndex((r) => r.id === id);
+  if (body === null) { if (i >= 0) rows.splice(i, 1); }
+  else {
+    const row = {...(i >= 0 ? rows[i] : {created_at: Date.now() / 1000}), ...body, id};
+    if (i >= 0) rows[i] = row; else rows.unshift(row);
+  }
+  const key = table + "/" + id;
+  outbox = outbox.filter((o) => o.key !== key);
+  outbox.push({key, url: `/api/${table}/${id}`, method: body === null ? "DELETE" : "PUT", body});
+  saveLocal(); syncBadge(); renderStores(); flush();
+}
+const put = (table, id, fields) => write(table, id, {...fields, client_ts: Date.now() / 1000});
+
+async function flush() {
+  if (flushing || storageOff) return;
+  flushing = true;
+  try {
+    while (outbox.length) {
+      const o = outbox[0];
+      let r;
+      try {
+        r = await fetch(o.url, {method: o.method, headers: {"Content-Type": "application/json"},
+                                body: o.body === null ? undefined : JSON.stringify(o.body)});
+      } catch (e) { syncBadge(); return; }  /* offline: keep it queued */
+      if (r.status === 503) { storageOff = true; syncBadge(); return; }
+      if (r.status >= 500 || r.status === 429 || r.status === 408) { syncBadge(); return; }
+      outbox.shift();  /* sent, or rejected for good (4xx): either way it leaves the queue */
+      if (!r.ok) { let d = ""; try { d = (await r.json()).detail; } catch (e) { /* none */ } syncBadge("not saved: " + d); }
+      saveLocal();
+    }
+    syncBadge();
+    await refresh();
+  } finally { flushing = false; }
+}
+
+/* Server is the truth once the outbox is empty; until then keep the optimistic cache. */
+async function refresh() {
+  if (outbox.length) return;
+  try {
+    const [t, s, p, o] = await Promise.all(["tournaments", "scenarios", "players", "observations"].map((x) => fetch("/api/" + x)));
+    if (t.status === 503) { storageOff = true; syncBadge(); renderStores(); return; }
+    if (![t, s, p, o].every((r) => r.ok)) return;
+    [db.tournaments, db.scenarios, db.players, db.observations] = await Promise.all([t, s, p, o].map((r) => r.json()));
+    storageOff = false; saveLocal(); syncBadge(); renderStores();
+  } catch (e) { /* offline: the cache stands */ }
+}
+
+/* ---------- views ---------- */
+function showView(v) {
+  for (const x of ["table", "saved", "players"]) $("v-" + x).hidden = x !== v;
+  document.querySelectorAll(".tabs .chip").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.v === v)));
+  if (v !== "table") refresh();
+}
+const when = (ts) => new Date(ts * 1000).toLocaleString(undefined, {month: "short", day: "numeric", hour: "numeric", minute: "2-digit"});
+const tname = (id) => (db.tournaments.find((t) => t.id === id) || {}).name || "";
+function confirmTap(btn, label, fn) {
+  /* two taps instead of a modal dialog */
+  if (btn.dataset.armed) { fn(); return; }
+  btn.dataset.armed = "1"; const old = btn.textContent; btn.textContent = label;
+  setTimeout(() => { delete btn.dataset.armed; btn.textContent = old; }, 3000);
+}
+
+function renderStores() {
+  /* re-rendering must not collapse what the user has open */
+  const opened = new Set([...document.querySelectorAll("details[data-key][open]")].map((d) => d.dataset.key));
+  const op = (k) => `data-key="${esc(k)}"${opened.has(k) ? " open" : ""}`;
+  /* tournament picker */
+  const sel = $("cur-t"), cur = state.tid;
+  sel.innerHTML = `<option value="">None</option>` + db.tournaments.map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join("");
+  sel.value = db.tournaments.some((t) => t.id === cur) ? cur : "";
+  $("player-names").innerHTML = db.players.map((p) => `<option value="${esc(p.nickname)}">`).join("");
+
+  /* saved spots, grouped by tournament */
+  const spots = (tid) => db.scenarios.filter((s) => (s.tournament_id || "") === tid);
+  const spotHtml = (s) => `<div class="list-item"><b>${esc(s.title)}</b><div class="meta">${when(s.created_at)}${s.note ? " · " + esc(s.note) : ""}</div>
+    <div class="row-actions"><button class="chip" type="button" data-open="${esc(s.id)}">Open</button>
+    <button class="chip danger" type="button" data-del-s="${esc(s.id)}">Delete</button></div></div>`;
+  let h = "";
+  for (const t of db.tournaments) {
+    const live = t.live && t.live.remaining ? ` · ${t.live.remaining} left, avg ${chips(+t.live.average || 0)} (${when(t.live.at)})` : "";
+    h += `<details class="t-group" ${op("t:" + t.id)}><summary>${esc(t.name)} <span class="hint">${esc(t.start_date || "")} · ${spots(t.id).length} spots</span></summary>
+      <div class="list-item meta">${esc([t.venue, t.buy_in ? "$" + t.buy_in : "", t.entrants ? t.entrants + " entrants" : "", t.paid_pct ? t.paid_pct + "% paid" : ""].filter(Boolean).join(" · "))}${live}
+      <div class="row-actions"><button class="chip" type="button" data-use="${esc(t.id)}">Play this one</button>
+      <button class="chip danger" type="button" data-del-t="${esc(t.id)}">Delete tournament</button></div></div>
+      ${spots(t.id).map(spotHtml).join("") || `<div class="list-item hint">No saved spots yet.</div>`}</details>`;
+  }
+  const loose = spots("");
+  if (loose.length) h += `<details class="t-group" ${op("t:")}><summary>Unfiled <span class="hint">${loose.length} spots</span></summary>${loose.map(spotHtml).join("")}</details>`;
+  if (storageOff) h = `<p class="hint">Saving is not configured on this server.</p>`;
+  else if (!h) h = `<p class="hint">Nothing saved yet. Add a tournament, then save spots from the Table tab.</p>`;
+  $("saved-list").innerHTML = h;
+
+  /* players */
+  const q = $("pl-search").value.trim().toLowerCase();
+  const ps = db.players.filter((p) => !q || (p.nickname + " " + p.description + " " + p.archetype + " " + p.notes).toLowerCase().includes(q));
+  const rate = (v) => (v == null ? "" : String(Math.round(v * 100)));
+  $("players-list").innerHTML = ps.map((p) => {
+    const obs = db.observations.filter((o) => o.player_id === p.id);
+    return `<details class="t-group" data-pid="${esc(p.id)}" ${op("p:" + p.id)}><summary>${esc(p.nickname)} <span class="hint">${esc(p.archetype || p.description || "")}</span></summary>
+      <div class="form">
+        <label class="field">Add an observation<textarea data-obs placeholder="e.g. limp-called AQo UTG at 40bb"></textarea></label>
+        <button class="chip" type="button" data-add-obs>Add${state.tid ? " (" + esc(tname(state.tid)) + ")" : ""}</button>
+        ${obs.map((o) => `<div class="obs">${esc(o.text)}<div class="meta">${when(o.seen_at)}${o.tournament_id ? " · " + esc(tname(o.tournament_id)) : ""}</div></div>`).join("")}
+        <label class="field">Nickname<input type="text" data-f="nickname" value="${esc(p.nickname)}"></label>
+        <label class="field">How to recognise them<input type="text" data-f="description" value="${esc(p.description || "")}"></label>
+        <label class="field">Type<input type="text" data-f="archetype" value="${esc(p.archetype || "")}" placeholder="e.g. tight-passive, sticky, maniac"></label>
+        <div class="row2">
+          <label class="field">Folds to c-bet %<input type="text" inputmode="numeric" data-r="fold_to_cbet" value="${rate(p.fold_to_cbet)}"></label>
+          <label class="field">Raises vs c-bet %<input type="text" inputmode="numeric" data-r="raise_vs_cbet" value="${rate(p.raise_vs_cbet)}"></label>
+        </div>
+        <div class="row2">
+          <label class="field">Re-jams over open %<input type="text" inputmode="numeric" data-r="re_jam_rate" value="${rate(p.re_jam_rate)}"></label>
+          <label class="field">Folds to iso %<input type="text" inputmode="numeric" data-r="fold_to_iso" value="${rate(p.fold_to_iso)}"></label>
+        </div>
+        <label class="field">Notes<textarea data-f="notes">${esc(p.notes || "")}</textarea></label>
+        <div class="row-actions"><button class="chip" type="button" data-save-p>Save player</button>
+        <button class="chip danger" type="button" data-del-p>Delete player</button></div>
+      </div></details>`;
+  }).join("") || `<p class="hint">${storageOff ? "Saving is not configured on this server." : q ? "No match." : "No players yet."}</p>`;
+}
+
+/* Restore a saved spot into the Table tab. */
+function openSpot(id) {
+  const sc = db.scenarios.find((s) => s.id === id);
+  if (!sc) return;
+  const inp = sc.input || {};
+  if (Array.isArray(inp.seats) && inp.seats.length >= 2) state.seats = inp.seats.slice(0, NSEATS).map(String);
+  state.names = state.seats.map((_, i) => String((inp.names || [])[i] || ""));
+  for (const k of ["remaining", "oavg", "pool", "pot", "pay", "entrants", "paidpct"]) state[k] = typeof inp[k] === "string" ? inp[k] : "";
+  if (inp.mode === "pct" || inp.mode === "amt") state.mode = inp.mode;
+  state.hero = Number.isInteger(inp.hero) && inp.hero < state.seats.length ? inp.hero : 0;
+  state.tid = sc.tournament_id || "";
+  for (const k of ["remaining", "oavg", "pool", "pot", "pay", "entrants", "paidpct"]) $(k).value = state[k];
+  buildSeats(); syncMode(); renderStores(); changed(); showView("table");
+}
+
+/* Picking a tournament fills in its field size; field updates during play go to its live snapshot. */
+function useTournament(id) {
+  state.tid = id;
+  const t = db.tournaments.find((x) => x.id === id);
+  if (t) {
+    if (t.entrants) { state.entrants = String(t.entrants); $("entrants").value = state.entrants; }
+    if (t.paid_pct) { state.paidpct = String(t.paid_pct); $("paidpct").value = state.paidpct; }
+  }
+  renderStores(); changed();
+}
+let liveTimer = null;
+function liveChanged() {
+  clearTimeout(liveTimer);
+  liveTimer = setTimeout(() => {
+    const t = db.tournaments.find((x) => x.id === state.tid);
+    if (!t || !(num(state.remaining) > 0)) return;
+    const live = {remaining: Math.floor(num(state.remaining)), average: num(state.oavg) || null, at: Date.now() / 1000};
+    if (t.live && t.live.remaining === live.remaining && t.live.average === live.average) return;
+    const {id, n_scenarios, created_at, updated_at, client_ts, ...fields} = t;
+    put("tournaments", id, {...fields, live});
+  }, 1500);
+}
+
+function wireStores() {
+  document.querySelectorAll(".tabs .chip").forEach((b) => b.addEventListener("click", () => showView(b.dataset.v)));
+  $("cur-t").addEventListener("change", (e) => useTournament(e.target.value));
+  $("remaining").addEventListener("input", liveChanged);
+  $("oavg").addEventListener("input", liveChanged);
+  $("pl-search").addEventListener("input", renderStores);
+
+  $("sv-go").addEventListener("click", () => {
+    const title = $("sv-title").value.trim();
+    if (!title) { $("sv-msg").textContent = "Give it a title."; return; }
+    const input = JSON.parse(JSON.stringify(state));
+    put("scenarios", uid(), {title, note: $("sv-note").value.trim(), tournament_id: state.tid || null, input});
+    $("sv-title").value = ""; $("sv-note").value = "";
+    $("sv-msg").textContent = "Saved" + (state.tid ? " to " + tname(state.tid) : "") + ".";
+  });
+
+  $("nt-go").addEventListener("click", () => {
+    const name = $("nt-name").value.trim();
+    if (!name) return;
+    const n = (id) => (num($(id).value) > 0 ? num($(id).value) : null);
+    const id = uid();
+    put("tournaments", id, {name, venue: $("nt-venue").value.trim(), start_date: $("nt-date").value.trim(),
+      buy_in: n("nt-buyin"), entrants: n("nt-entrants") && Math.floor(n("nt-entrants")), paid_pct: n("nt-paid"), notes: "", live: null});
+    for (const f of ["nt-name", "nt-venue", "nt-date", "nt-buyin", "nt-entrants", "nt-paid"]) $(f).value = "";
+    useTournament(id);
+  });
+
+  $("np-go").addEventListener("click", () => {
+    const nickname = $("np-nick").value.trim();
+    if (!nickname) return;
+    put("players", uid(), {nickname, description: $("np-desc").value.trim(), archetype: "", notes: "",
+      fold_to_cbet: null, raise_vs_cbet: null, re_jam_rate: null, fold_to_iso: null});
+    $("np-nick").value = ""; $("np-desc").value = "";
+  });
+
+  $("saved-list").addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    if (b.dataset.open) openSpot(b.dataset.open);
+    else if (b.dataset.use) { useTournament(b.dataset.use); showView("table"); }
+    else if (b.dataset.delS) confirmTap(b, "Tap again to delete", () => write("scenarios", b.dataset.delS, null));
+    else if (b.dataset.delT) confirmTap(b, "Tap again: spots stay, unfiled", () => {
+      db.scenarios.forEach((s) => { if (s.tournament_id === b.dataset.delT) s.tournament_id = null; });
+      write("tournaments", b.dataset.delT, null);
+    });
+  });
+
+  $("players-list").addEventListener("click", (e) => {
+    const b = e.target.closest("button"), box = e.target.closest("[data-pid]");
+    if (!b || !box) return;
+    const pid = box.dataset.pid;
+    if (b.hasAttribute("data-add-obs")) {
+      const text = box.querySelector("[data-obs]").value.trim();
+      if (!text) return;
+      write("observations", uid(), {player_id: pid, tournament_id: state.tid || null, text, seen_at: Date.now() / 1000});
+    } else if (b.hasAttribute("data-save-p")) {
+      const f = {};
+      box.querySelectorAll("[data-f]").forEach((el) => { f[el.dataset.f] = el.value.trim(); });
+      box.querySelectorAll("[data-r]").forEach((el) => { const v = num(el.value); f[el.dataset.r] = v >= 0 && v <= 100 ? v / 100 : null; });
+      if (!f.nickname) return;
+      put("players", pid, f);
+    } else if (b.hasAttribute("data-del-p")) {
+      confirmTap(b, "Tap again: deletes notes too", () => {
+        db.observations = db.observations.filter((o) => o.player_id !== pid);
+        write("players", pid, null);
+      });
+    }
+  });
+
+  window.addEventListener("online", flush);
+  setInterval(() => { if (outbox.length) flush(); }, 30000);
+}
+
+loadLocal(); wireStores(); renderStores(); syncBadge(); flush(); refresh();
 </script>
 </body>
 </html>
